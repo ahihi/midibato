@@ -1,0 +1,9 @@
+[package]
+name = "midibato"
+version = "0.1.0"
+authors = ["Miranda Kastemaa <miranda@foldplop.com>"]
+
+[dependencies]
+glium = "0.20"
+glium_pib = { git = "https://github.com/ahihi/glium_pib" }
+
