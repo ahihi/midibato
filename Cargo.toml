@@ -3,7 +3,15 @@ name = "midibato"
 version = "0.1.0"
 authors = ["Miranda Kastemaa <miranda@foldplop.com>"]
 
+[lib]
+name = "midibato"
+path = "src/lib.rs"
+
+[[bin]]
+name = "midibato-exe"
+path = "src/main.rs"
+
 [dependencies]
 glium = "0.20"
 glium_pib = { git = "https://github.com/ahihi/glium_pib" }
-
+portmidi = "0.2"
