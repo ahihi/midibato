@@ -37,7 +37,7 @@ impl Vertex {
         let x1 = (x as f32) / x_max * 2.0 - 1.0;
         let y1 = (y as f32) / y_max * 2.0 - 1.0;
         
-        Vertex { position: [x1, y1] }
+        Vertex { position: [x1, -y1] }
     }
 }
 
@@ -66,31 +66,46 @@ impl Area {
         }
     }
 
-    pub fn vertices(&self, resolution: [u32; 2]) -> Vec<Vertex> {
+    pub fn vertices(&self, resolution: [u32; 2]) -> (Vec<Vertex>, Vec<Vertex>) {
         let x0 = self.upper_left[0];
         let y0 = self.upper_left[1];
         let x1 = self.lower_right[0];
         let y1 = self.lower_right[1];
-        vec![
-            Vertex::new(x0, y0, resolution),
+
+        let h = y1 - y0;
+
+        let y_t = y1 - (self.value as u32) * h / 127;
+        
+        let fg_vertices = vec![
+            Vertex::new(x0, y_t, resolution),
             Vertex::new(x0, y1, resolution),
-            Vertex::new(x1, y1, resolution),
-            Vertex::new(x1, y0, resolution)
-        ]
+            Vertex::new(x1 - 1, y1, resolution),
+            Vertex::new(x1 - 1, y_t, resolution)
+        ];
+
+        let y_b = if y_t > 0 { y_t - 1 } else { y_t };
+        
+        let bg_vertices = vec![
+            Vertex::new(x0, y0, resolution),
+            Vertex::new(x0, y_b, resolution),
+            Vertex::new(x1 - 1, y_b, resolution),
+            Vertex::new(x1 - 1, y0, resolution)
+        ];
+        
+        (fg_vertices, bg_vertices)
     }
 }
 
 pub struct Midibato {
-    resolution: [u32; 2],
     areas: Vec<Area>,
     facade: Rc<glium::backend::Context>,
-    area_buffers: Vec<glium::VertexBuffer<Vertex>>,
     indices: glium::index::NoIndices,
-    program: glium::Program
+    fg_program: glium::Program,
+    bg_program: glium::Program
 }
 
 impl Midibato {
-    pub fn new(controls: Vec<Control>, resolution: [u32; 2]) -> Self {
+    pub fn new(controls: Vec<Control>) -> Self {
         let facade: Rc<glium::backend::Context> = {
             let system = glium_pib::System::new(Default::default());
             let system = match system {
@@ -131,56 +146,67 @@ impl Midibato {
             x_offset += width_div;
         }
 
-        
-        let area_buffers: Vec<glium::VertexBuffer<Vertex>> = areas.iter()
-            .map(|area|
-                 glium::VertexBuffer::new(&facade, &area.vertices([width, height]))
-                 .expect("Failed to create vertex buffer")
-            )
-            .collect();
         let indices = glium::index::NoIndices(glium::index::PrimitiveType::TriangleFan);
 
         let vertex_shader_src = include_str!("glsl/slider.vert");
-        let fragment_shader_src = include_str!("glsl/slider.frag");
-        let program = glium::Program::from_source(
+        let fg_fragment_shader_src = include_str!("glsl/slider_fg.frag");
+        let bg_fragment_shader_src = include_str!("glsl/slider_bg.frag");
+
+        let fg_program = glium::Program::from_source(
             &facade,
             vertex_shader_src,
-            fragment_shader_src,
+            fg_fragment_shader_src,
             None
-        ).expect("Failed to create program");
+        ).expect("Failed to create fg program");
+        let bg_program = glium::Program::from_source(
+            &facade,
+            vertex_shader_src,
+            bg_fragment_shader_src,
+            None
+        ).expect("Failed to create bg program");
         
         Midibato {
-            resolution: resolution,
             areas: areas,
             facade: facade,
-            area_buffers: area_buffers,
             indices: indices,
-            program: program
+            fg_program: fg_program,
+            bg_program: bg_program
         }
     }
 
     fn render(&self) {
+        let (width, height) = self.facade.get_framebuffer_dimensions();
+        
         let mut target = glium::Frame::new(
             self.facade.clone(),
-            self.facade.get_framebuffer_dimensions()
+            (width, height)
         );
         target.clear_color(0.0, 0.0, 0.0, 1.0);
 
-        for (area, vertex_buffer) in self.areas.iter().zip(self.area_buffers.iter()) {
-            println!("{:?} {:?}", area.control.color, area.value as f32);
+        for area in self.areas.iter() {
+            let (fg_vertices, bg_vertices) = area.vertices([width, height]);
+
+            let fg_vertex_buffer = glium::VertexBuffer::new(&self.facade, &fg_vertices)
+                .expect("Failed to create fg vertex buffer");
+            
+            let bg_vertex_buffer = glium::VertexBuffer::new(&self.facade, &bg_vertices)
+                .expect("Failed to create bg vertex buffer");
+            
             target.draw(
-                vertex_buffer,
+                &fg_vertex_buffer,
                 &self.indices,
-                &self.program,
-                &uniform! {
-                    //u_color: area.control.color,
-                    u_red: [area.control.color[0]],
-                    u_green: [area.control.color[1]],
-                    u_blue: [area.control.color[2]],
-                    u_value: [area.value as f32]
-                },
+                &self.fg_program,
+                &glium::uniforms::EmptyUniforms,
                 &Default::default()
-            ).expect("Failed to draw");
+            ).expect("Failed to draw fg");
+
+            target.draw(
+                &bg_vertex_buffer,
+                &self.indices,
+                &self.bg_program,
+                &glium::uniforms::EmptyUniforms,
+                &Default::default()
+            ).expect("Failed to draw bg");
         }
         
         target.finish().expect("Failed to finish");
@@ -200,7 +226,6 @@ impl Midibato {
                             let value = (127 - 127 * point[1] / area.dimensions()[1]) as u8;
 
                             area.value = value;
-                            println!("value: {:?}", value);
                         }
                     }
 
